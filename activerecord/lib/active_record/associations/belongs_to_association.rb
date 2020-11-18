@@ -11,8 +11,20 @@ module ActiveRecord
         when :destroy
           target.destroy
           raise ActiveRecord::Rollback unless target.destroyed?
+        when :destroy_async
+          id = owner.public_send(reflection.foreign_key.to_sym)
+          primary_key_column = reflection.active_record_primary_key.to_sym
+
+          enqueue_destroy_association(
+            owner_model_name: owner.class.to_s,
+            owner_id: owner.id,
+            association_class: reflection.klass.to_s,
+            association_ids: [id],
+            association_primary_key_column: primary_key_column,
+            ensuring_owner_was_method: options.fetch(:ensuring_owner_was, nil)
+          )
         else
-          target.send(options[:dependent])
+          target.public_send(options[:dependent])
         end
       end
 
@@ -44,7 +56,7 @@ module ActiveRecord
 
       def decrement_counters_before_last_save
         if reflection.polymorphic?
-          model_was = owner.attribute_before_last_save(reflection.foreign_type).try(:constantize)
+          model_was = owner.attribute_before_last_save(reflection.foreign_type)&.constantize
         else
           model_was = klass
         end
@@ -108,11 +120,9 @@ module ActiveRecord
           owner._read_attribute(reflection.foreign_key)
         end
 
-        # NOTE - for now, we're only supporting inverse setting from belongs_to back onto
-        # has_one associations.
         def invertible_for?(record)
           inverse = inverse_reflection_for(record)
-          inverse && inverse.has_one?
+          inverse && (inverse.has_one? || ActiveRecord::Base.has_many_inversing)
         end
 
         def stale_state

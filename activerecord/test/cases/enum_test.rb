@@ -3,6 +3,7 @@
 require "cases/helper"
 require "models/author"
 require "models/book"
+require "active_support/log_subscriber/test_helper"
 
 class EnumTest < ActiveRecord::TestCase
   fixtures :books, :authors, :author_addresses
@@ -26,7 +27,7 @@ class EnumTest < ActiveRecord::TestCase
 
   test "query state with strings" do
     assert_equal "published", @book.status
-    assert_equal "read", @book.read_status
+    assert_equal "read", @book.last_read
     assert_equal "english", @book.language
     assert_equal "visible", @book.author_visibility
     assert_equal "visible", @book.illustrator_visibility
@@ -67,7 +68,7 @@ class EnumTest < ActiveRecord::TestCase
     assert_not_equal @book, Book.where(status: [:written]).first
     assert_not_equal @book, Book.where.not(status: :published).first
     assert_equal @book, Book.where.not(status: :written).first
-    assert_equal books(:ddd), Book.where(read_status: :forgotten).first
+    assert_equal books(:ddd), Book.where(last_read: :forgotten).first
   end
 
   test "find via where with strings" do
@@ -77,7 +78,7 @@ class EnumTest < ActiveRecord::TestCase
     assert_not_equal @book, Book.where(status: ["written"]).first
     assert_not_equal @book, Book.where.not(status: "published").first
     assert_equal @book, Book.where.not(status: "written").first
-    assert_equal books(:ddd), Book.where(read_status: "forgotten").first
+    assert_equal books(:ddd), Book.where(last_read: "forgotten").first
   end
 
   test "build from scope" do
@@ -130,6 +131,16 @@ class EnumTest < ActiveRecord::TestCase
     @book.language = :spanish
     assert_equal old_status, @book.changed_attributes[:status]
     assert_equal old_language, @book.changed_attributes[:language]
+  end
+
+  test "enum value after write symbol" do
+    @book.status = :proposed
+    assert_equal "proposed", @book.status
+  end
+
+  test "enum value after write string" do
+    @book.status = "proposed"
+    assert_equal "proposed", @book.status
   end
 
   test "enum changes" do
@@ -225,14 +236,33 @@ class EnumTest < ActiveRecord::TestCase
     assert_nil @book.reload.status
   end
 
+  test "deserialize nil value to enum which defines nil value to hash" do
+    assert_equal "forgotten", books(:ddd).last_read
+  end
+
   test "assign nil value" do
     @book.status = nil
     assert_nil @book.status
   end
 
+  test "assign nil value to enum which defines nil value to hash" do
+    @book.last_read = nil
+    assert_equal "forgotten", @book.last_read
+  end
+
   test "assign empty string value" do
     @book.status = ""
     assert_nil @book.status
+  end
+
+  test "assign false value to a field defined as not boolean" do
+    @book.status = false
+    assert_nil @book.status
+  end
+
+  test "assign false value to a field defined as boolean" do
+    @book.boolean_status = false
+    assert_equal "disabled", @book.boolean_status
   end
 
   test "assign long empty string value" do
@@ -260,13 +290,23 @@ class EnumTest < ActiveRecord::TestCase
     assert_predicate Book.illustrator_visibility_invisible.create, :illustrator_visibility_invisible?
   end
 
-  test "_before_type_cast" do
+  test "attribute_before_type_cast" do
     assert_equal 2, @book.status_before_type_cast
     assert_equal "published", @book.status
 
     @book.status = "published"
 
     assert_equal "published", @book.status_before_type_cast
+    assert_equal "published", @book.status
+  end
+
+  test "attribute_for_database" do
+    assert_equal 2, @book.status_for_database
+    assert_equal "published", @book.status
+
+    @book.status = "published"
+
+    assert_equal 2, @book.status_for_database
     assert_equal "published", @book.status
   end
 
@@ -557,6 +597,25 @@ class EnumTest < ActiveRecord::TestCase
     assert_equal :integer, Book.type_for_attribute("status").type
   end
 
+  test "enum on custom attribute with default" do
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "books"
+      attribute :status, default: 2
+      enum status: [:proposed, :written, :published]
+    end
+
+    assert_equal "published", klass.new.status
+  end
+
+  test "overloaded default" do
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "books"
+      enum status: [:proposed, :written, :published], _default: :published
+    end
+
+    assert_equal "published", klass.new.status
+  end
+
   test "scopes can be disabled" do
     klass = Class.new(ActiveRecord::Base) do
       self.table_name = "books"
@@ -564,5 +623,49 @@ class EnumTest < ActiveRecord::TestCase
     end
 
     assert_raises(NoMethodError) { klass.proposed }
+  end
+
+  test "scopes are named like methods" do
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "cats"
+      enum breed: { "American Bobtail" => 0, "Balinese-Javanese" => 1 }
+    end
+
+    assert_respond_to klass, :American_Bobtail
+    assert_respond_to klass, :Balinese_Javanese
+  end
+
+  test "capital characters for enum names" do
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "computers"
+      enum extendedWarranty: [:extendedSilver, :extendedGold]
+    end
+
+    computer = klass.extendedSilver.build
+    assert_predicate computer, :extendedSilver?
+    assert_not_predicate computer, :extendedGold?
+  end
+
+  test "enums with a negative condition log a warning" do
+    old_logger = ActiveRecord::Base.logger
+    logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
+
+    ActiveRecord::Base.logger = logger
+
+    expected_message = "An enum element in Book uses the prefix 'not_'."\
+      " This will cause a conflict with auto generated negative scopes."
+
+    Class.new(ActiveRecord::Base) do
+      def self.name
+        "Book"
+      end
+      silence_warnings do
+        enum status: [:sent, :not_sent]
+      end
+    end
+
+    assert_match(expected_message, logger.logged(:warn).first)
+  ensure
+    ActiveRecord::Base.logger = old_logger
   end
 end

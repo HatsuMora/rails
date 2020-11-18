@@ -34,7 +34,6 @@ module ActionView
         end
 
         private
-
           def value
             if @allow_method_names_outside_object
               object.public_send @method_name if object && object.respond_to?(@method_name)
@@ -130,11 +129,11 @@ module ActionView
           end
 
           def sanitized_object_name
-            @sanitized_object_name ||= @object_name.gsub(/\]\[|[^-a-zA-Z0-9:.]/, "_").sub(/_$/, "")
+            @sanitized_object_name ||= @object_name.gsub(/\]\[|[^-a-zA-Z0-9:.]/, "_").delete_suffix("_")
           end
 
           def sanitized_method_name
-            @sanitized_method_name ||= @method_name.sub(/\?$/, "")
+            @sanitized_method_name ||= @method_name.delete_suffix("?")
           end
 
           def sanitized_value(value)
@@ -167,8 +166,11 @@ module ActionView
 
           def add_options(option_tags, options, value = nil)
             if options[:include_blank]
-              option_tags = tag_builder.content_tag_string("option", options[:include_blank].kind_of?(String) ? options[:include_blank] : nil, value: "") + "\n" + option_tags
+              content = (options[:include_blank] if options[:include_blank].is_a?(String))
+              label = (" " unless content)
+              option_tags = tag_builder.content_tag_string("option", content, value: "", label: label) + "\n" + option_tags
             end
+
             if value.blank? && options[:prompt]
               tag_options = { value: "" }.tap do |prompt_opts|
                 prompt_opts[:disabled] = true if options[:disabled] == ""
@@ -176,6 +178,7 @@ module ActionView
               end
               option_tags = tag_builder.content_tag_string("option", prompt_text(options[:prompt]), tag_options) + "\n" + option_tags
             end
+
             option_tags
           end
 

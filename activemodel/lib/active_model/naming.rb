@@ -8,7 +8,7 @@ module ActiveModel
   class Name
     include Comparable
 
-    attr_reader :singular, :plural, :element, :collection,
+    attr_accessor :singular, :plural, :element, :collection,
       :singular_route_key, :route_key, :param_key, :i18n_key,
       :name
 
@@ -166,7 +166,7 @@ module ActiveModel
 
       raise ArgumentError, "Class name cannot be blank. You need to supply a name argument when anonymous class given" if @name.blank?
 
-      @unnamespaced = @name.sub(/^#{namespace.name}::/, "") if namespace
+      @unnamespaced = @name.delete_prefix("#{namespace.name}::") if namespace
       @klass        = klass
       @singular     = _singularize(@name)
       @plural       = ActiveSupport::Inflector.pluralize(@singular)
@@ -203,11 +203,10 @@ module ActiveModel
       defaults << @human
 
       options = { scope: [@klass.i18n_scope, :models], count: 1, default: defaults }.merge!(options.except(:default))
-      I18n.translate(defaults.shift, options)
+      I18n.translate(defaults.shift, **options)
     end
 
     private
-
       def _singularize(string)
         ActiveSupport::Inflector.underscore(string).tr("/", "_")
       end

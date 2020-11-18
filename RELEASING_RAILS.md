@@ -21,11 +21,11 @@ https://buildkite.com/rails/rails
 
 Sam Ruby keeps a [test suite](https://github.com/rubys/awdwr) that makes
 sure the code samples in his book
-([Agile Web Development with Rails](https://pragprog.com/book/rails51/agile-web-development-with-rails-51))
+([Agile Web Development with Rails](https://pragprog.com/titles/rails6))
 all work. These are valuable system tests
 for Rails. You can check the status of these tests here:
 
-[http://intertwingly.net/projects/dashboard.html](http://intertwingly.net/projects/dashboard.html)
+[https://intertwingly.net/projects/dashboard.html](https://intertwingly.net/projects/dashboard.html)
 
 Do not release with Red AWDwR tests.
 

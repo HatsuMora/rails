@@ -21,14 +21,14 @@ if SERVICE_CONFIGURATIONS[:s3] && SERVICE_CONFIGURATIONS[:s3][:access_key_id].pr
         filename: "hello.txt", byte_size: 6, checksum: checksum, content_type: "text/plain" } }
 
       response.parsed_body.tap do |details|
-        assert_equal ActiveStorage::Blob.find(details["id"]), ActiveStorage::Blob.find_signed(details["signed_id"])
+        assert_equal ActiveStorage::Blob.find(details["id"]), ActiveStorage::Blob.find_signed!(details["signed_id"])
         assert_equal "hello.txt", details["filename"]
         assert_equal 6, details["byte_size"]
         assert_equal checksum, details["checksum"]
         assert_equal "text/plain", details["content_type"]
         assert_match SERVICE_CONFIGURATIONS[:s3][:bucket], details["direct_upload"]["url"]
         assert_match(/s3(-[-a-z0-9]+)?\.(\S+)?amazonaws\.com/, details["direct_upload"]["url"])
-        assert_equal({ "Content-Type" => "text/plain", "Content-MD5" => checksum }, details["direct_upload"]["headers"])
+        assert_equal({ "Content-Type" => "text/plain", "Content-MD5" => checksum, "Content-Disposition" => "inline; filename=\"hello.txt\"; filename*=UTF-8''hello.txt" }, details["direct_upload"]["headers"])
       end
     end
   end
@@ -56,13 +56,13 @@ if SERVICE_CONFIGURATIONS[:gcs]
         filename: "hello.txt", byte_size: 6, checksum: checksum, content_type: "text/plain" } }
 
       @response.parsed_body.tap do |details|
-        assert_equal ActiveStorage::Blob.find(details["id"]), ActiveStorage::Blob.find_signed(details["signed_id"])
+        assert_equal ActiveStorage::Blob.find(details["id"]), ActiveStorage::Blob.find_signed!(details["signed_id"])
         assert_equal "hello.txt", details["filename"]
         assert_equal 6, details["byte_size"]
         assert_equal checksum, details["checksum"]
         assert_equal "text/plain", details["content_type"]
         assert_match %r{storage\.googleapis\.com/#{@config[:bucket]}}, details["direct_upload"]["url"]
-        assert_equal({ "Content-MD5" => checksum }, details["direct_upload"]["headers"])
+        assert_equal({ "Content-MD5" => checksum, "Content-Disposition" => "inline; filename=\"hello.txt\"; filename*=UTF-8''hello.txt" }, details["direct_upload"]["headers"])
       end
     end
   end
@@ -90,13 +90,13 @@ if SERVICE_CONFIGURATIONS[:azure]
         filename: "hello.txt", byte_size: 6, checksum: checksum, content_type: "text/plain" } }
 
       @response.parsed_body.tap do |details|
-        assert_equal ActiveStorage::Blob.find(details["id"]), ActiveStorage::Blob.find_signed(details["signed_id"])
+        assert_equal ActiveStorage::Blob.find(details["id"]), ActiveStorage::Blob.find_signed!(details["signed_id"])
         assert_equal "hello.txt", details["filename"]
         assert_equal 6, details["byte_size"]
         assert_equal checksum, details["checksum"]
         assert_equal "text/plain", details["content_type"]
         assert_match %r{#{@config[:storage_account_name]}\.blob\.core\.windows\.net/#{@config[:container]}}, details["direct_upload"]["url"]
-        assert_equal({ "Content-Type" => "text/plain", "Content-MD5" => checksum, "x-ms-blob-type" => "BlockBlob" }, details["direct_upload"]["headers"])
+        assert_equal({ "Content-Type" => "text/plain", "Content-MD5" => checksum, "x-ms-blob-content-disposition" => "inline; filename=\"hello.txt\"; filename*=UTF-8''hello.txt", "x-ms-blob-type" => "BlockBlob" }, details["direct_upload"]["headers"])
       end
     end
   end
@@ -112,7 +112,7 @@ class ActiveStorage::DiskDirectUploadsControllerTest < ActionDispatch::Integrati
       filename: "hello.txt", byte_size: 6, checksum: checksum, content_type: "text/plain" } }
 
     @response.parsed_body.tap do |details|
-      assert_equal ActiveStorage::Blob.find(details["id"]), ActiveStorage::Blob.find_signed(details["signed_id"])
+      assert_equal ActiveStorage::Blob.find(details["id"]), ActiveStorage::Blob.find_signed!(details["signed_id"])
       assert_equal "hello.txt", details["filename"]
       assert_equal 6, details["byte_size"]
       assert_equal checksum, details["checksum"]

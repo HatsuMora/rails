@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
-require "abstract_unit"
+require_relative "../abstract_unit"
 require "active_support/core_ext/hash"
 require "bigdecimal"
 require "active_support/core_ext/string/access"
 require "active_support/ordered_hash"
 require "active_support/core_ext/object/conversions"
+require "active_support/core_ext/date/conversions"
 require "active_support/core_ext/object/deep_dup"
 require "active_support/inflections"
 
@@ -387,11 +388,13 @@ class HashExtTest < ActiveSupport::TestCase
   def test_extract_nils
     original = { a: nil, b: nil }
     expected = { a: nil }
+    remaining = { b: nil }
     extracted = original.extract!(:a, :x)
 
     assert_equal expected, extracted
     assert_nil extracted[:a]
     assert_nil extracted[:x]
+    assert_equal remaining, original
   end
 
   def test_except
@@ -429,12 +432,6 @@ class HashExtTest < ActiveSupport::TestCase
     original = { a: "x", b: "y" }
     assert_not_called(original, :delete) do
       original.except(:a)
-    end
-  end
-
-  def test_requiring_compact_is_deprecated
-    assert_deprecated do
-      require "active_support/core_ext/hash/compact"
     end
   end
 end

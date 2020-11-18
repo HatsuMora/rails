@@ -6,16 +6,6 @@ module ActionDispatch
       class Pattern # :nodoc:
         attr_reader :spec, :requirements, :anchored
 
-        def self.from_string(string)
-          build(string, {}, "/.?", true)
-        end
-
-        def self.build(path, requirements, separators, anchored)
-          parser = Journey::Parser.new
-          ast = parser.parse path
-          new ast, requirements, separators, anchored
-        end
-
         def initialize(ast, requirements, separators, anchored)
           @spec         = ast
           @requirements = requirements
@@ -44,11 +34,6 @@ module ActionDispatch
           @spec.find_all(&:symbol?).each do |node|
             re = @requirements[node.to_sym]
             node.regexp = re if re
-          end
-
-          @spec.find_all(&:star?).each do |node|
-            node = node.left
-            node.regexp = @requirements[node.to_sym] || /(.+)/
           end
 
           @spec
@@ -81,7 +66,7 @@ module ActionDispatch
           end
 
           def visit_CAT(node)
-            [visit(node.left), visit(node.right)].join
+            "#{visit(node.left)}#{visit(node.right)}"
           end
 
           def visit_SYMBOL(node)
@@ -107,8 +92,8 @@ module ActionDispatch
           end
 
           def visit_STAR(node)
-            re = @matchers[node.left.to_sym] || ".+"
-            "(#{re})"
+            re = @matchers[node.left.to_sym]
+            re ? "(#{re})" : "(.+)"
           end
 
           def visit_OR(node)
@@ -165,6 +150,10 @@ module ActionDispatch
         end
         alias :=~ :match
 
+        def match?(other)
+          to_regexp.match?(other)
+        end
+
         def source
           to_regexp.source
         end
@@ -173,8 +162,13 @@ module ActionDispatch
           @re ||= regexp_visitor.new(@separators, @requirements).accept spec
         end
 
-        private
+        def requirements_for_missing_keys_check
+          @requirements_for_missing_keys_check ||= requirements.transform_values do |regex|
+            /\A#{regex}\Z/
+          end
+        end
 
+        private
           def regexp_visitor
             @anchored ? AnchoredRegexp : UnanchoredRegexp
           end

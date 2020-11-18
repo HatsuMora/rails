@@ -74,32 +74,24 @@ module ActiveSupport
       # Support raw values in the local cache strategy.
       module LocalCacheWithRaw # :nodoc:
         private
-          def read_entry(key, options)
-            entry = super
-            if options[:raw] && local_cache && entry
-              entry = deserialize_entry(entry.value)
-            end
-            entry
-          end
-
-          def write_entry(key, entry, options)
+          def write_entry(key, entry, **options)
             if options[:raw] && local_cache
               raw_entry = Entry.new(serialize_entry(entry, raw: true))
               raw_entry.expires_at = entry.expires_at
-              super(key, raw_entry, options)
+              super(key, raw_entry, **options)
             else
               super
             end
           end
 
-          def write_multi_entries(entries, options)
+          def write_multi_entries(entries, **options)
             if options[:raw] && local_cache
               raw_entries = entries.map do |key, entry|
                 raw_entry = Entry.new(serialize_entry(entry, raw: true))
                 raw_entry.expires_at = entry.expires_at
               end.to_h
 
-              super(raw_entries, options)
+              super(raw_entries, **options)
             else
               super
             end
@@ -177,7 +169,7 @@ module ActiveSupport
       # Race condition TTL is not set by default. This can be used to avoid
       # "thundering herd" cache writes when hot cache entries are expired.
       # See <tt>ActiveSupport::Cache::Store#fetch</tt> for more.
-      def initialize(namespace: nil, compress: true, compress_threshold: 1.kilobyte, expires_in: nil, race_condition_ttl: nil, error_handler: DEFAULT_ERROR_HANDLER, **redis_options)
+      def initialize(namespace: nil, compress: true, compress_threshold: 1.kilobyte, coder: DEFAULT_CODER, expires_in: nil, race_condition_ttl: nil, error_handler: DEFAULT_ERROR_HANDLER, **redis_options)
         @redis_options = redis_options
 
         @max_key_bytesize = MAX_KEY_BYTESIZE
@@ -185,7 +177,8 @@ module ActiveSupport
 
         super namespace: namespace,
           compress: compress, compress_threshold: compress_threshold,
-          expires_in: expires_in, race_condition_ttl: race_condition_ttl
+          expires_in: expires_in, race_condition_ttl: race_condition_ttl,
+          coder: coder
       end
 
       def redis
@@ -203,7 +196,7 @@ module ActiveSupport
 
       def inspect
         instance = @redis || @redis_options
-        "<##{self.class} options=#{options.inspect} redis=#{instance.inspect}>"
+        "#<#{self.class} options=#{options.inspect} redis=#{instance.inspect}>"
       end
 
       # Cache Store API implementation.
@@ -246,10 +239,14 @@ module ActiveSupport
             pattern = namespace_key(matcher, options)
             cursor = "0"
             # Fetch keys in batches using SCAN to avoid blocking the Redis server.
-            begin
-              cursor, keys = c.scan(cursor, match: pattern, count: SCAN_BATCH_SIZE)
-              c.del(*keys) unless keys.empty?
-            end until cursor == "0"
+            nodes = c.respond_to?(:nodes) ? c.nodes : [c]
+
+            nodes.each do |node|
+              begin
+                cursor, keys = node.scan(cursor, match: pattern, count: SCAN_BATCH_SIZE)
+                node.del(*keys) unless keys.empty?
+              end until cursor == "0"
+            end
           end
         end
       end
@@ -346,15 +343,16 @@ module ActiveSupport
 
         # Store provider interface:
         # Read an entry from the cache.
-        def read_entry(key, options = nil)
+        def read_entry(key, **options)
           failsafe :read_entry do
-            deserialize_entry redis.with { |c| c.get(key) }
+            raw = options&.fetch(:raw, false)
+            deserialize_entry(redis.with { |c| c.get(key) }, raw: raw)
           end
         end
 
-        def read_multi_entries(names, _options)
+        def read_multi_entries(names, **options)
           if mget_capable?
-            read_multi_mget(*names)
+            read_multi_mget(*names, **options)
           else
             super
           end
@@ -364,6 +362,7 @@ module ActiveSupport
           options = names.extract_options!
           options = merged_options(options)
           return {} if names == []
+          raw = options&.fetch(:raw, false)
 
           keys = names.map { |name| normalize_key(name, options) }
 
@@ -373,7 +372,7 @@ module ActiveSupport
 
           names.zip(values).each_with_object({}) do |(name, value), results|
             if value
-              entry = deserialize_entry(value)
+              entry = deserialize_entry(value, raw: raw)
               unless entry.nil? || entry.expired? || entry.mismatched?(normalize_version(name, options))
                 results[name] = entry.value
               end
@@ -400,7 +399,7 @@ module ActiveSupport
               modifiers[:nx] = unless_exist
               modifiers[:px] = (1000 * expires_in.to_f).ceil if expires_in
 
-              redis.with { |c| c.set key, serialized_entry, modifiers }
+              redis.with { |c| c.set key, serialized_entry, **modifiers }
             else
               redis.with { |c| c.set key, serialized_entry }
             end
@@ -420,6 +419,11 @@ module ActiveSupport
           end
         end
 
+        # Deletes multiple entries in the cache. Returns the number of entries deleted.
+        def delete_multi_entries(entries, **_options)
+          redis.with { |c| c.del(entries) }
+        end
+
         # Nonstandard store provider API to write multiple values at once.
         def write_multi_entries(entries, expires_in: nil, **options)
           if entries.any?
@@ -435,11 +439,11 @@ module ActiveSupport
 
         # Truncate keys that exceed 1kB.
         def normalize_key(key, options)
-          truncate_key super.b
+          truncate_key super&.b
         end
 
         def truncate_key(key)
-          if key.bytesize > max_key_bytesize
+          if key && key.bytesize > max_key_bytesize
             suffix = ":sha2:#{::Digest::SHA2.hexdigest(key)}"
             truncate_at = max_key_bytesize - suffix.bytesize
             "#{key.byteslice(0, truncate_at)}#{suffix}"
@@ -448,10 +452,11 @@ module ActiveSupport
           end
         end
 
-        def deserialize_entry(serialized_entry)
-          if serialized_entry
-            entry = Marshal.load(serialized_entry) rescue serialized_entry
-            entry.is_a?(Entry) ? entry : Entry.new(entry)
+        def deserialize_entry(payload, raw:)
+          if payload && raw
+            Entry.new(payload, compress: false)
+          else
+            super(payload)
           end
         end
 
@@ -459,7 +464,7 @@ module ActiveSupport
           if raw
             entry.value.to_s
           else
-            Marshal.dump(entry)
+            super(entry)
           end
         end
 
@@ -471,7 +476,7 @@ module ActiveSupport
 
         def failsafe(method, returning: nil)
           yield
-        rescue ::Redis::BaseConnectionError => e
+        rescue ::Redis::BaseError => e
           handle_exception exception: e, method: method, returning: returning
           returning
         end

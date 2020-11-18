@@ -69,6 +69,8 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal :string, @first.column_for_attribute(:title).type
     assert_equal :string, @first.type_for_attribute("title").type
     assert_equal :string, @first.type_for_attribute(:title).type
+    assert_equal :string, @first.type_for_attribute("heading").type
+    assert_equal :string, @first.type_for_attribute(:heading).type
     assert_equal 250, @first.column_for_attribute("title").limit
   end
 
@@ -326,7 +328,7 @@ class ReflectionTest < ActiveRecord::TestCase
   def test_association_primary_key
     # Normal association
     assert_equal "id",   Author.reflect_on_association(:posts).association_primary_key.to_s
-    assert_equal "name", Author.reflect_on_association(:essay).association_primary_key.to_s
+    assert_equal "id",   Author.reflect_on_association(:essay).association_primary_key.to_s
     assert_equal "name", Essay.reflect_on_association(:writer).association_primary_key.to_s
 
     # Through association (uses the :primary_key option from the source reflection)
@@ -512,7 +514,7 @@ class ReflectionTest < ActiveRecord::TestCase
     def assert_reflection(klass, association, options)
       assert reflection = klass.reflect_on_association(association)
       options.each do |method, value|
-        assert_equal(value, reflection.send(method))
+        assert_equal(value, reflection.public_send(method))
       end
     end
 end
